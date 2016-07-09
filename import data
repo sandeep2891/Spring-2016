@@ -1,0 +1,134 @@
+__author__ = 'Sandeep'
+
+import pandas as pd
+import os
+import pickle
+import timeit
+import time
+
+#Data check
+def clean_DST_data(cus):
+     p = cus.head(29192)
+     j = cus.tail(5844)
+     for i in [29188,29189,29190,29191]:
+         p.set_value(i,'Usage' ,cus.at[i,'Usage']/2 )
+     k = cus.loc[29188:29191]
+     frame = [p,k,j]
+     cus1 = pd.concat(frame,ignore_index=True)
+     #make sure the load data is mapped correctly by checking number of values
+     if len(cus1) != 35040:
+         print("We don't have the complete set of records for this customer")
+         exit()
+     return cus1
+
+def load_data(m):
+    
+    sd_path = ['D:/DataScience/DataScience/Edison/SACT_1362279.csv',
+               'D:/DataScience/DataScience/Edison/MasterMetaData_CLEAN-ss-test-push1-FOR5PVONLY.xlsx',
+               'D:/DataScience/DataScience/Edison/PV-15Min-SAM.xlsx',
+               'D:/DataScience/DataScience/Edison/Costs1.xlsx']
+  #list order must have file paths that correspond to necessary inputs (base elec load, meta data, pv 15 min data, cost)
+
+    #import load data and clean it for DST
+    #df1 = clean_DST_data(pd.read_csv(all_path[x][0]))
+    path = "D:/Camden Cleaned/Camden Cleaned/"
+    #for filename in os.listdir(path):
+        #df1 = (pd.read_csv(all_path[x][0]))
+
+    df1 = pd.read_csv(m)
+    df1["DateTime"] = pd.to_datetime(df1["DateTime"])
+
+    #create day/month/hour indexes, join them, and rename
+    day = df1['DateTime'].dt.day
+    month = df1['DateTime'].dt.month
+    hour = df1['DateTime'].dt.hour
+
+    day_of_year = df1['DateTime'].dt.dayofyear
+    df2 = pd.concat([month, day, hour, day_of_year, df1], axis=1)
+    df2.columns = ['month', 'day', 'hour', 'day_of_year', '15m datetime', 'Base Usage kWh']
+    df2['Base Usage kWh'] = df2['Base Usage kWh']  # At this step, customers with n meters where n > 1 were having every value divided by n
+    df2['UID'] = df2.index  # UID is Unique ID (starts at 0, goes to 35039)
+
+
+    #finds the max in kW
+    max_kw = (df2.groupby(['month'])['Base Usage kWh'].max()*4)
+    #finds the sum in kWh
+    sum_kWh = sum(df2.groupby(['month'])['Base Usage kWh'].sum())
+    #finds the average in kW
+    average_kW = (df2.groupby(['month'])['Base Usage kWh'].mean()*4)
+
+    EL_meta = pd.concat([max_kw, average_kW], axis=1)
+    EL_meta.columns = ['max_kw', 'average_kW']
+
+    # Read in Cost Sheet for Tariff Charges (eg UT Prices KW, UT Prices KWH)
+    cost_import_sheet = pd.ExcelFile(all_path[x][3])
+
+    # Read in Customer Metadata information (e.g. ID, Tariff Schedule Name, Voltage)
+    meta_dataframe = pd.read_excel(all_path[x][1])
+
+    #do not use this because indexes lose datetime properties - df1.set_index(['Interval_PCFC_DateTime'], inplace=True)
+    return df2, sum_kWh, EL_meta, cost_import_sheet, meta_dataframe
+
+
+#import/calculate meta data
+    #sum of annual kWh
+    #convert kWh_del to 15 minute demand
+    #detrmine 2015 peak demand
+    #determine load factor for each month
+
+'''
+#check if pickle file exists, if not then read into df
+def load_data_pickle(loading_data):
+    pre, ext = os.path.splitext(loading_data)
+    pickle_filepath = pre + '.pickle'
+    #loading data is the file being loaded and we'll use the same filename sans the extension for the pickle filename
+    if not os.path.exists(pickle_filepath):
+        #read dataset from disk
+        var1 = pd.read_csv(loading_data)
+        #write to pickle file
+        var1.to_pickle(pickle_filepath)
+        return var1
+    else:
+        var1 = pd.read_pickle(pickle_filepath)
+        return var1
+'''
+
+def import_pv(df1, kWh_sum):
+    
+    sd_path = ['D:/Camden_SACT_Usage/Camden_SACT_Usage/SACT_1362279.csv',
+               'D:/DataScience/DataScience/Edison/MasterMetaData_CLEAN-ss-test-push1.xlsx',
+               'D:/DataScience/DataScience/Edison/PV-15Min-SAM.xlsx',
+               'D:/DataScience/DataScience/Edison/Costs1.xlsx']
+
+    dfpv_raw = pd.read_excel('D:/DataScience/DataScience/Edison/PV-15Min-SAM.xlsx', parse_cols=2)
+
+    #calc PV size, return 100% PV dataframe
+    z = kWh_sum/(dfpv_raw['PV_kWh'].sum())
+
+    #check for NEM PV limitation
+    if z >= 1000:
+        maxpvsize = 1000
+    else:
+        maxpvsize = kWh_sum/(dfpv_raw.sum())
+
+    #create pv dataframe
+    pv_list, pv_name = [], []
+    for i in range(10,0,-1):
+        pv_name.append('pv' + str(i) + '0')
+        pv_list.append(dfpv_raw*maxpvsize*(i/-10))
+    df2 = pd.concat(pv_list, axis=1, ignore_index=True)
+    df2.columns = pv_name
+    df2.reset_index(drop=True, inplace=True)
+
+    #convert to numeric
+    df4 = pd.to_numeric(df1.loc[:,'Base Usage kWh'])
+
+    #add each column to
+    df5 = df2.apply(lambda x: x+df4)
+    return df5, maxpvsize
+
+
+if __name__ == "__main__":
+    a = time.time()
+    df1, sumkWh, elec_meta = load_data()
+    df2, maxpvsize = import_pv(df1, sumkWh)
