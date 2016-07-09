@@ -1,4 +1,6 @@
-from Comm_DER_Analyzer import import_data
+__author__ = 'Sandeep'
+
+
 from Comm_DER_Analyzer import monthly_tariff
 import pandas as pd
 import numpy as np
