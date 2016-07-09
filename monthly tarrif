@@ -1,0 +1,115 @@
++__author__ = 'Sandeep'
+
+
+import warnings
+warnings.simplefilter(action = "ignore", category = FutureWarning)
+import pandas as pd
+import numpy as np
+import datetime
+import operator
+import time
+
+def customer_bill(cust_id,df1,mdf,xls,column_name_usage):
+
+    # This dictionary stores the column numbers in Costs Sheet to parse for "Code Values" for each tariff for each timestamp, which are used to look up Energy and Demand Prices
+    colm = {'TOU-8-CPP-2000': [0, 35], 'TOU-8-CPP': [0, 23], 'TOU-GS3-CPP': [0, 19], 'TOU-GS2-CPP': [0, 15],
+            'TOU-GS1-CPP': [0, 12], 'TOU-8-R-2000': [0, 36], 'TOU-8-R': [0, 24], 'TOU-GS3-R': [0, 20],
+            'TOU-GS2-R': [0, 16], 'TOU-GS1-R': [0, 37], 'TOU-GS3-B': [0, 18], 'TOU-GS2-B': [0, 14],
+            'TOU-GS1-B': [0, 11], 'TOU-8-B': [0, 22], 'TOU-8-A-2000': [0, 33], 'TOU-8-A': [0, 21], 'TOU-GS3-A': [0, 17],
+            'TOU-GS2-A': [0, 13], 'TOU-GS1-A': [0, 10], 'TOU-8-B-2000': [0, 34]}
+
+    # This dictionary stores the column numbers in Costs Sheet to parse for both Energy and Demand (because the pages are laid out in the exact same order)
+    coln = {'TOU-8-CPP-2000': [2, 22], 'TOU-8-CPP': [2, 21], 'TOU-GS3-CPP': [2, 20], 'TOU-GS2-CPP': [2, 19],
+            'TOU-GS1-CPP': [2, 18], 'TOU-8-R-2000': [2, 17], 'TOU-8-R': [2, 16], 'TOU-GS3-R': [2, 15],
+            'TOU-GS2-R': [2, 14], 'TOU-GS1-R': [2, 13], 'TOU-GS3-B': [2, 10], 'TOU-GS2-B': [2, 9], 'TOU-GS1-B': [2, 8],
+            'TOU-8-B': [2, 11], 'TOU-8-A-2000': [2, 7], 'TOU-8-A': [2, 6], 'TOU-GS3-A': [2, 5],
+            'TOU-GS2-A': [2, 4], 'TOU-GS1-A': [2, 3], 'TOU-8-B-2000': [2, 12]}
+
+    #print('The Customer ID is :',cust_id)
+
+    # after reading in metadata for all customers, find the customer of interest and keep it only, overwriting the rest
+    mdf = mdf[mdf['Serv_Acct_Id'] == cust_id]
+
+
+    # now throwing out everyting except for customer's rate
+    # (note: if the Metadata sheet has a tariff that's not found in the colm and coln dictionary, it will throw an error.)
+    # (note: to avoid above error, correct the tariff in the Metadata sheet to a standard format ahead of importing into python.)
+    mdf = mdf.iloc[0]['Rate']
+
+
+    #if mdf in ['TOU-GS2-B-AE','TOU-GS2-A-AE','TOU-GS3R-AE','TOU-GS3-B-AE','TOU-GS3-A-AE','TOU-PA3-RTP','TOU-GS1-A-AE','TOU-GS1-B-AE','TPA3-SOP1','TOU-8-R-APSE']:
+     #   continue
+    #df4 is the UT Price KWH sheet from the costs workbook
+    df4 = xls.parse(3,header=0,parse_cols=coln[mdf])
+    #df5 is the UT Price KW sheet from the costs workbook
+    df5 = xls.parse(4,header=0,parse_cols=coln[mdf])
+    #df is the UT Import Hours sheet from the costs workbook (Has UID and the "Code Values")
+    df = xls.parse(5,header=0,parse_cols=colm[mdf])
+
+    #look for demand charges in the UT Price KW sheet
+    demand_charges = df5.iloc[6][mdf]
+    print(mdf)
+    def temp_bill_calc():
+        new_dff = pd.merge(df,df1,on='UID') #this is a join on the UID (to get all the "code values" associated with all the interval reads)
+        # Use the np.sum function to calculate energy (KWH) by month
+        print(new_dff)
+        newbie01 = new_dff.groupby(['month', mdf]).agg({column_name_usage: np.sum}).reset_index()
+        print(newbie01)
+        # Use the np.max function to calculate demand (KW) charges by month
+        newbie02 = new_dff.groupby(['month', mdf]).agg({column_name_usage: np.max}).reset_index()
+
+        # *************
+        # ENERGY (KWH) SECTION
+        # *************
+        x = pd.merge(df4, newbie01, left_on = 'Number', right_on = mdf) #left join on the "Code Value" (i.e. 1 thru 6, e.g. summer on-peak), mdf is the tariff
+        x.columns = ['xyz','rate', 'month', mdf, 'Energy'] #name the columns (xyz column not used, it's a duplication)
+        x.drop(x.columns[[0]], axis=1,inplace=True) #drop xyz column
+        x['tariff in $'] = x['rate'] * x['Energy'] #calcuate the cost in dollars of energy, save in new column
+        x = x.sort_values(['month', mdf], ascending=[True, True])
+        x['month'] = x['month'].map({1:'jan',2:'feb',3:'march',4:'april',5:'may',6:'june',7:'july',8:'aug',9:'sept',10:'oct',11:'nov',12:'dec'}) #rename to make reading easier
+        x[mdf] = x[mdf].map({6: 'Winter_off', 5: 'Winter_mid', 4:'CPP', 3:'Summer_off', 2:'Summer_mid', 1:'Summer_peak'}) #rename to make reading easier
+        x = x[['month', mdf, 'rate', 'Energy','tariff in $']] #resorting the columns
+
+        sum_x = x['tariff in $'].sum(axis=0) #total energy charge for the customer for the year
+
+        #print(x) #print to screen the whole table of energy usage and costs by period
+
+        # *************
+        # DEMAND (KW) SECTION
+        # *************
+        y = pd.merge(df5,newbie02,left_on='Number',right_on=mdf)
+        y.columns = ['xyz','rate', 'month',mdf, 'Demand']
+        y['Demand'] = y['Demand']*4
+
+        # m values are the Time Related Demand Charges
+        m = y.copy()
+        m['Demand charges in $'] = m['Demand'] * m['rate']
+
+        # y values become Facilities Related Demand Charges
+        y = y.sort('Demand', ascending=False).groupby('month', as_index=False).first() #For each month, take max of the max demands from all time periods (sort then take first to find max)
+        y['Demand charges in $'] = y['Demand'] * demand_charges
+        y['Demand charge in $/kw'] = y['Demand charges in $']/y['Demand']
+        y.drop(y.columns[[1,2]], axis=1,inplace=True)
+
+        # z values are all the demand charges in the same structure
+        z = y.append(m)
+
+        z = z.sort_values(['month', mdf], ascending=[True, True])
+        z = z[z['Demand charges in $'] != 0] #drop any periods with a demand charge = zero
+        z = z.fillna(value=0) #fill the n/a values with zero (artifact of the merge)
+        z.drop(z.columns[[3,6]], axis=1,inplace=True) #drop data you don't need to make it more readable
+
+        z = z[['month', 'Demand', 'Demand charge in $/kw','rate', 'Demand charges in $']]
+        z = z.sort_values(['month', 'rate'], ascending=[True, True])
+        z['month'] = z['month'].map({1:'jan',2:'feb',3:'march',4:'april',5:'may',6:'june',7:'july',8:'aug',9:'sept',10:'oct',11:'nov',12:'dec'})
+
+        #print(z) #print to screen the whole table of demand measurements and costs by month and/or period
+
+        z_sum = z['Demand charges in $'].sum(axis=0) #total demand charge for the customer for the year
+        if sum_x < 0:
+            sum_x = 0
+        final = z_sum + sum_x #total bill (Dollars) for the customer, for the year
+        #print('The bill for the entire year is :',final)
+
+        return final
+  
