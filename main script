@@ -1,0 +1,41 @@
+from Comm_DER_Analyzer import import_data
+from Comm_DER_Analyzer import monthly_tariff
+import pandas as pd
+import numpy as np
+from Comm_DER_Analyzer import battery_sizing
+import os
+import time
+from xlwt import *
+import xlrd
+
+
+# this is the main script to call all the finished modules
+
+# load, meta, pv gen, costs
+
+
+
+path = "D:/Camden Cleaned/Camden Cleaned/"
+for filename in os.listdir(path):
+    cust_id = filename[5:-4]
+    cust_id = int(cust_id)
+
+        continue
+    m = path+filename
+    df1, sumkWh, elec_meta, cost_sheet,meta_df = import_data.load_data(m)
+    df2, maxpvsize = import_data.import_pv(df1, sumkWh)
+
+    df_final_test = pd.concat([df1,df2], axis=1, join_axes=[df1.index])
+
+
+    annual_bill = monthly_tariff.customer_bill(cust_id,df_final_test,meta_df,cost_sheet,'Base Usage kWh')
+    annual_bill_pv100 = monthly_tariff.customer_bill(cust_id,df_final_test,meta_df,cost_sheet,'pv100')
+    annual_bill_pv90 = monthly_tariff.customer_bill(cust_id,df_final_test,meta_df,cost_sheet,'pv90')
+    annual_bill_pv80 = monthly_tariff.customer_bill(cust_id,df_final_test,meta_df,cost_sheet,'pv80')
+    annual_bill_pv70 = monthly_tariff.customer_bill(cust_id,df_final_test,meta_df,cost_sheet,'pv70')
+    annual_bill_pv60 = monthly_tariff.customer_bill(cust_id,df_final_test,meta_df,cost_sheet,'pv60')
+    annual_bill_pv50 = monthly_tariff.customer_bill(cust_id,df_final_test,meta_df,cost_sheet,'pv50')
+    annual_bill_pv40 = monthly_tariff.customer_bill(cust_id,df_final_test,meta_df,cost_sheet,'pv40')
+    annual_bill_pv30 = monthly_tariff.customer_bill(cust_id,df_final_test,meta_df,cost_sheet,'pv30')
+    annual_bill_pv20 = monthly_tariff.customer_bill(cust_id,df_final_test,meta_df,cost_sheet,'pv20')
+    annual_bill_pv10 = monthly_tariff.customer_bill(cust_id,df_final_test,meta_df,cost_sheet,'pv10')
